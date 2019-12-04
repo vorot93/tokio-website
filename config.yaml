@@ -17,7 +17,7 @@ menu:
       name: "[0.1] I/O with Tokio"
       weight: 3000
     - identifier: "going_deeper"
-      name: "[0.1] Going deeper"
+      name: "Going deeper"
       weight: 7000
     - identifier: "internals"
       name: "[0.1] Tokio internals"

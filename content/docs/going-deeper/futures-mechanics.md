@@ -1,5 +1,5 @@
 ---
-title: "Essential combinators"
+title: "[0.1] Essential combinators"
 weight: 7070
 menu:
   docs:

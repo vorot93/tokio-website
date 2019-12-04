@@ -1,5 +1,5 @@
 ---
-title: "Futures: In Depth"
+title: "[0.1] Futures: In Depth"
 weight : 7010
 menu:
   docs:

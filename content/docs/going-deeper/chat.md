@@ -1,5 +1,5 @@
 ---
-title: "Example: A Chat Server"
+title: "[0.1] Example: A Chat Server"
 weight : 7050
 menu:
   docs:

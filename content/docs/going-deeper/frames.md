@@ -1,5 +1,5 @@
 ---
-title: "Working with framed streams"
+title: "[0.1] Working with framed streams"
 weight: 7090
 menu:
   docs:
