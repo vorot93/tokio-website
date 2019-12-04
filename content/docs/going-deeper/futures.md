@@ -1,5 +1,5 @@
 ---
-title: "[0.1] Futures: In Depth"
+title: "Futures: In Depth"
 weight : 7010
 menu:
   docs:
@@ -10,7 +10,7 @@ Futures, hinted at earlier in the guide, are the building block used to manage
 asynchronous logic. They are the underlying asynchronous abstraction used by
 Tokio.
 
-The future implementation is provided by the [`futures`] crate. However, for
+The future implementation is provided by the [`std::future`] and [`std::task`] modules. However, for
 convenience, Tokio re-exports a number of the types.
 
 # What Are Futures?
@@ -26,8 +26,7 @@ of basic I/O, you can use a future to represent a wide range of events, e.g.:
 * **An RPC invocation** to a server. When the server replies, the future is
   completed, and its value is the server’s response.
 
-* **A timeout**. When time is up, the future is completed, and its value is
-  `()`.
+* **A timeout**. When time is up, the future is completed.
 
 * **A long-running CPU-intensive task**, running on a thread pool. When the task
   finishes, the future is completed, and its value is the return value of the
@@ -62,7 +61,7 @@ future to a function.
 
 ```rust,ignore
 let response_is_ok = response_future
-    .map(|response| {
+    .map_ok(|response| {
         response.status().is_ok()
     });
 
@@ -82,7 +81,7 @@ Implementing the `Future` is pretty common when using Tokio, so it is important
 to be comfortable with it.
 
 As discussed in the previous section, Rust futures are poll based. This is a
-unique aspect of the Rust future library. Most future libraries for other
+unique aspect of the Rust future model. Most future libraries for other
 programming languages use a push based model where callbacks are supplied to the
 future and the computation invokes the callback immediately with the computation
 result.
@@ -97,20 +96,18 @@ The `Future` trait is as follows:
 
 ```rust,ignore
 trait Future {
-    /// The type of the value returned when the future completes.
-    type Item;
+    /// The type of value produced on completion.
+    type Output;
 
-    /// The type representing errors that occurred while processing the
-    /// computation.
-    type Error;
-
-    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error>;
+    /// Attempt to resolve the future to a final value, registering
+    /// the current task for wakeup if the value is not yet available.
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
 }
 ```
 
 Usually, when you implement a `Future`, you will be defining a computation that
 is a composition of sub (or inner) futures. In this case, the future implementation tries
-to call the inner future(s) and returns `NotReady` if the inner futures are not
+to call the inner future(s) and returns `Pending` if the inner futures are not
 ready.
 
 The following example is a future that is composed of another future that
@@ -118,9 +115,12 @@ returns a `usize` and will double that value:
 
 ```rust
 # #![deny(deprecated)]
-# extern crate futures;
-# use futures::*;
+# use futures::prelude::*;
+# use pin_project::*;
+# use std::{pin::Pin, task::{Context, Poll}};
+#[pin_project]
 pub struct Doubler<T> {
+    #[pin]
     inner: T,
 }
 
@@ -129,37 +129,35 @@ pub fn double<T>(inner: T) -> Doubler<T> {
 }
 
 impl<T> Future for Doubler<T>
-where T: Future<Item = usize>
+where T: Future<Output = usize>
 {
-    type Item = usize;
-    type Error = T::Error;
+    type Output = usize;
 
-    fn poll(&mut self) -> Result<Async<usize>, T::Error> {
-        match self.inner.poll()? {
-            Async::Ready(v) => Ok(Async::Ready(v * 2)),
-            Async::NotReady => Ok(Async::NotReady),
-        }
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx).map(|v| v * 2)
     }
 }
 # pub fn main() {}
 ```
 
 When the `Doubler` future is polled, it polls its inner future. If the inner
-future is not ready, the `Doubler` future returns `NotReady`. If the inner
+future is not ready, the `Doubler` future returns `Pending`. If the inner
 future is ready, then the `Doubler` future doubles the return value and returns
 `Ready`.
 
 Because the matching pattern above is common, the [`futures`] crate provides a
-macro: `try_ready!`. It is similar to `try!` or `?`, but it also returns on
-`NotReady`. The above `poll` function can be rewritten using `try_ready!` as
+macro: `ready!`. It is similar to `try!` or `?`, but returns on
+`Pending`. The above `poll` function can be rewritten using `ready!` as
 follows:
 
 ```rust
 # #![deny(deprecated)]
-# #[macro_use]
-# extern crate futures;
-# use futures::*;
+# use futures::{ready, prelude::*};
+# use pin_project::*;
+# use std::{pin::Pin, task::{Context, Poll}};
+# #[pin_project]
 # pub struct Doubler<T> {
+#     #[pin]
 #     inner: T,
 # }
 #
@@ -169,39 +167,39 @@ follows:
 #     type Item = usize;
 #     type Error = T::Error;
 #
-fn poll(&mut self) -> Result<Async<usize>, T::Error> {
-    let v = try_ready!(self.inner.poll());
+fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    let v = ready!(self.project().inner.poll());
     Ok(Async::Ready(v * 2))
 }
 # }
 # pub fn main() {}
 ```
 
-# Returning `NotReady`
+# Returning `Pending`
 
 The last section handwaved a bit and said that once a Future transitioned to the
 ready state, the executor is notified. This enables the executor to be efficient
 in scheduling tasks.
 
-When a function returns Async::NotReady, it signals that it is currently not in
+When a function returns `Poll::Pending`, it signals that it is currently not in
 a ready state and is unable to complete the operation. It is critical that the
 executor is notified when the state transitions to "ready". Otherwise, the task
 will hang infinitely, never getting run again.
 
 For most future implementations, this is done transitively. When a future
 implementation is a combination of sub futures, the outer future only returns
-`NotReady` when at least one inner future returned `NotReady`. Thus, the outer
+`Pending` when at least one inner future returned `Pending`. Thus, the outer
 future will transition to a ready state once the inner future transitions to a
-ready state. In this case, the `NotReady` contract is already satisfied as the
+ready state. In this case, the `Pending` contract is already satisfied as the
 inner future will notify the executor when it becomes ready.
 
 Innermost futures, sometimes called "resources", are the ones responsible for
-notifying the executor. This is done by calling [`notify`] on the task returned
-by [`task::current()`].
+notifying the executor. This is done by calling [`wake`] on the waker returned
+by [`Context::waker()`].
 
 We will be exploring implementing resources and the task system in more depth in
-a later section. The key take away here is **do not return `NotReady` unless you
-got `NotReady` from an inner future**.
+a later section. The key take away here is **do not return `Pending` unless you
+got `Pending` from an inner future**.
 
 # A More Complicated Future
 
@@ -228,9 +226,8 @@ We will use an `enum` to track the state of the future as it advances through
 these steps.
 
 ```rust
-# extern crate tokio;
-# use tokio::net::tcp::ConnectFuture;
 # pub struct ResolveFuture;
+# pub struct ConnectFuture;
 enum State {
     // Currently resolving the host name
     Resolving(ResolveFuture),
@@ -256,22 +253,25 @@ Now, the implementation:
 
 ```rust
 # #![deny(deprecated)]
-# #[macro_use]
-# extern crate futures;
-# extern crate tokio;
-# use tokio::net::tcp::{ConnectFuture, TcpStream};
+# use tokio::net::TcpStream;
 # use futures::prelude::*;
-# use std::io;
+# use std::{io, pin::Pin, task::{Context, Poll}};
 # pub struct ResolveFuture;
+# pub struct ConnectFuture;
 # enum State {
 #     Resolving(ResolveFuture),
 #     Connecting(ConnectFuture),
 # }
 # fn resolve(host: &str) -> ResolveFuture { unimplemented!() }
 # impl Future for ResolveFuture {
-#     type Item = ::std::net::SocketAddr;
-#     type Error = io::Error;
-#     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+#     type Output = Result<::std::net::SocketAddr, io::Error>;
+#     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+#         unimplemented!();
+#     }
+# }
+# impl Future for ConnectFuture {
+#     type Output = Result<TcpStream, io::Error>;
+#     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 #         unimplemented!();
 #     }
 # }
@@ -285,19 +285,18 @@ pub fn resolve_and_connect(host: &str) -> ResolveAndConnect {
 }
 
 impl Future for ResolveAndConnect {
-    type Item = TcpStream;
-    type Error = io::Error;
+    type Output = Result<TcpStream, io::Error>;
 
-    fn poll(&mut self) -> Result<Async<TcpStream>, io::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         use self::State::*;
 
         loop {
             let addr = match self.state {
                 Resolving(ref mut fut) => {
-                    try_ready!(fut.poll())
+                    ready!(Pin::new(&mut fut).poll(cx))
                 }
                 Connecting(ref mut fut) => {
-                    return fut.poll();
+                    return Pin::new(&mut fut).poll(cx);
                 }
             };
 
@@ -325,25 +324,21 @@ probably just use that combinator.
 
 ```rust
 # #![deny(deprecated)]
-# #[macro_use]
-# extern crate futures;
-# extern crate tokio;
-# use tokio::net::tcp::{ConnectFuture, TcpStream};
+# use tokio::net::TcpStream;
 # use futures::prelude::*;
-# use std::io;
+# use std::{io, pin::Pin, task::{Context, Poll}};
 # pub struct ResolveFuture;
 # fn resolve(host: &str) -> ResolveFuture { unimplemented!() }
 # impl Future for ResolveFuture {
-#     type Item = ::std::net::SocketAddr;
-#     type Error = io::Error;
-#     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+#     type Output = Result<::std::net::SocketAddr, io::Error>;
+#     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 #         unimplemented!();
 #     }
 # }
 # pub fn dox(my_host: &str) {
 # let _ =
 resolve(my_host)
-    .and_then(|addr| TcpStream::connect(&addr))
+    .and_then(|addr| TcpStream::connect(addr))
 # ;
 # }
 # pub fn main() {}
@@ -351,7 +346,9 @@ resolve(my_host)
 
 This is much shorter and does the same thing.
 
+[`std::future`]: {{< api-url "std" >}}/future
+[`std::task`]: {{< api-url "std" >}}/task
 [`futures`]: {{< api-url "futures" >}}
-[`notify`]: {{< api-url "futures" >}}/executor/trait.Notify.html#tymethod.notify
-[`task::current()`]: {{< api-url "futures" >}}/task/fn.current.html
+[`Context::waker()`]: {{< api-url "std" >}}/task/struct.Context.html#method.waker
+[`wake`]: {{< api-url "std" >}}/task/struct.Waker.html#method.wake
 [`AndThen`]: {{< api-url "futures" >}}/future/struct.AndThen.html

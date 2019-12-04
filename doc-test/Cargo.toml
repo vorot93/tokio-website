@@ -10,6 +10,7 @@ public = false
 futures = "0.3.0"
 tokio = { version = "0.2", features = ["full"] }
 bytes = "0.5"
+pin-project = "0.4"
 
 [build-dependencies]
 skeptic = "0.13"
