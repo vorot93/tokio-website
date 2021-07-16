@@ -2,8 +2,37 @@
 title: "Channels"
 ---
 
-Now that we have learned some about concurrency with Tokio, let's apply this on
-the client side. Say we want to run two concurrent Redis commands. We can spawn
+Now that we have learned a bit about concurrency with Tokio, let's apply this on
+the client side. Put the server code we wrote before into an explicit binary 
+file:
+
+```text
+mkdir src/bin
+mv src/main.rs src/bin/server.rs
+```
+
+and create a new binary file that will contain the client code:
+
+```text
+touch src/bin/client.rs
+```
+
+In this file you will write this page's code. Whenever you want to run it,
+you will have to launch the server first in a separate terminal window:
+
+```text
+cargo run --bin server
+```
+
+And then the client, __separately__:
+
+```text
+cargo run --bin client
+```
+
+That being said, let's code!
+
+Say we want to run two concurrent Redis commands. We can spawn
 one task per command. Then the two commands would happen concurrently.
 
 At first, we might try something like:
@@ -260,7 +289,7 @@ The final step is to receive the response back from the manager task. The `GET`
 command needs to get the value and the `SET` command needs to know if the
 operation completed successfully.
 
-To pass the response, an `oneshot` channel is used. The `oneshot` channel is a
+To pass the response, a `oneshot` channel is used. The `oneshot` channel is a
 single-producer, single-consumer channel optimized for sending a single value.
 In our case, the single value is the response.
 
@@ -384,7 +413,7 @@ while let Some(cmd) = rx.recv().await {
 ```
 
 Calling `send` on `oneshot::Sender` completes immediately and does **not**
-require an `.await`. This is because `send` on an `oneshot` channel will always
+require an `.await`. This is because `send` on a `oneshot` channel will always
 fail or succeed immediately without any form of waiting.
 
 Sending a value on a oneshot channel returns `Err` when the receiver half has

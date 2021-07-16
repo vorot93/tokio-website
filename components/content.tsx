@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown/with-html";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import GithubSlugger from "github-slugger";
 import CustomBlocks from "remark-custom-blocks";
+import Link from "next/link";
 
 const CodeBlock = ({ language, value }) => {
   // Remove lines starting with `# `. This is code to make the doc tests pass
@@ -167,11 +168,20 @@ export default function Content({ menu, href, title, next, prev, body, mdPath })
     return Heading(slugger, headings, props);
   };
 
+  let isBlogRoute = href.startsWith("/blog");
+
   return (
     <>
       <div className="columns is-marginless tk-docs">
         <div className="column is-one-quarter tk-docs-nav">
-          <Menu href={href} menu={menu} />
+          <Menu href={href} menu={menu}>
+            { isBlogRoute && (
+                <div className="all-posts-link">
+                  <Link href="/blog"><a>More Blog Posts</a></Link>
+                </div>
+              )
+            }
+          </Menu>
         </div>
         <div className="column is-three-quarters tk-content">
           <section className="section content">

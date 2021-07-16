@@ -7,6 +7,7 @@ const menu = {
     nested: {
       tutorial: {
         nested: [
+          "setup",
           "hello-tokio",
           "spawning",
           "shared-state",
@@ -16,6 +17,12 @@ const menu = {
           "async",
           "select",
           "streams",
+        ],
+      },
+      topics: {
+        nested: [
+          "bridging",
+          "shutdown",
         ],
       },
       glossary: {},
